@@ -1,0 +1,25 @@
+{
+  "name": "cosmic-velocity-multiplayer-runner",
+  "version": "1.0.0",
+  "description": "Endless runner espacial multiplayer com Express, Socket.IO e Three.js/WebGL.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "multiplayer",
+    "socket.io",
+    "threejs",
+    "webgl",
+    "endless-runner",
+    "space"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "three": "^0.184.0"
+  }
+}

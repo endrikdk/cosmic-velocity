@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cosmic Velocity: Multiplayer Runner</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app-shell" data-screen="menu">
+      <canvas id="gameCanvas" width="960" height="540"></canvas>
+      <header class="shell-header">
+        <a class="mini-brand" href="/" aria-label="Cosmic Velocity">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Cosmic Velocity</span>
+        </a>
+        <button id="musicToggleBtn" class="sound-toggle" type="button" aria-pressed="true">
+          <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span id="musicToggleLabel">Som ligado</span>
+        </button>
+      </header>
+
+      <section id="menuScreen" class="screen screen-active">
+        <div class="brand-block menu-intro">
+          <p class="eyebrow">Corra. Evolua. Sobreviva.</p>
+          <h1>Cosmic Velocity</h1>
+          <p class="subtitle">Atravesse um túnel que nunca termina, fortaleça sua nave e tente durar mais que os outros pilotos.</p>
+          <div class="menu-meta">
+            <span><strong>1-4</strong> pilotos</span>
+            <span><strong>∞</strong> velocidade</span>
+            <span><strong>4</strong> níveis de arma</span>
+          </div>
+        </div>
+
+        <form id="menuForm" class="panel menu-console" autocomplete="off">
+          <div class="console-heading">
+            <div>
+              <p class="eyebrow">Preparar nave</p>
+              <h2>Entrar na corrida</h2>
+            </div>
+            <span class="live-signal"><i></i> Servidor online</span>
+          </div>
+          <label>
+            Nome do piloto
+            <input id="nicknameInput" maxlength="18" placeholder="Como devemos chamar você?" required />
+          </label>
+
+          <div class="menu-actions primary-actions">
+            <button id="soloBtn" type="button">Começar sozinho</button>
+            <button id="createRoomBtn" type="button" class="secondary">Criar sala</button>
+          </div>
+
+          <div class="room-entry">
+            <label>
+              Entrar com código
+              <input id="roomCodeInput" maxlength="5" placeholder="ABCDE" />
+            </label>
+            <button id="joinRoomBtn" type="button">Entrar</button>
+          </div>
+
+          <div class="quick-rules">
+            <span><kbd>A</kbd> esquerda</span>
+            <span><kbd>S</kbd> direita</span>
+            <span><kbd>Espaço</kbd> atirar</span>
+            <span><kbd>Esc</kbd> pausar</span>
+          </div>
+        </form>
+      </section>
+
+      <section id="lobbyScreen" class="screen">
+        <div class="lobby-grid">
+          <div class="panel lobby-main">
+            <p class="eyebrow">Hangar de partida</p>
+            <h2 id="roomCodeLabel">-----</h2>
+            <p id="lobbyStatus">Aguardando pilotos...</p>
+            <div id="playerList" class="player-list"></div>
+            <div class="menu-actions">
+              <button id="startGameBtn" type="button">Lançar naves</button>
+              <button id="copyCodeBtn" type="button" class="secondary">Copiar código</button>
+              <button id="backToMenuBtn" type="button" class="ghost">Voltar</button>
+            </div>
+          </div>
+          <aside class="panel compact">
+            <p class="eyebrow">Melhores corridas</p>
+            <h3>Ranking geral</h3>
+            <ol id="globalLeaderboard" class="leaderboard"></ol>
+          </aside>
+        </div>
+      </section>
+
+      <section id="gameScreen" class="screen game-screen">
+        <div class="hud top-left">
+          <div>Vida <strong id="lifeLabel">3</strong></div>
+          <div>Score <strong id="scoreLabel">0</strong></div>
+          <div>Distancia <strong id="distanceLabel">0</strong></div>
+          <div>Fase <strong id="phaseLabel">1</strong></div>
+          <div>Arma <strong id="weaponLabel">1/4</strong></div>
+        </div>
+        <div class="hud top-right">
+          <div id="connectionLabel">Conectando</div>
+          <div id="aliveLabel">0 vivos</div>
+        </div>
+        <div id="upgradeBars" class="hud upgrade-bars"></div>
+        <aside id="buffHub" class="hud buff-hub" aria-label="Efeitos coletados">
+          <div class="buff-hub-title">Efeitos</div>
+          <div id="buffList" class="buff-list">
+            <div class="buff-empty">Nenhum efeito ativo</div>
+          </div>
+        </aside>
+        <div class="hud rank-panel">
+          <h3>Sala</h3>
+          <ol id="roomRanking" class="leaderboard"></ol>
+        </div>
+        <div id="pauseOverlay" class="pause-overlay" aria-hidden="true">
+          <div class="pause-panel">
+            <p class="eyebrow">Pausado</p>
+            <h2>Corrida em espera</h2>
+            <p id="pauseStatus">A sala esta pausada.</p>
+            <div class="menu-actions">
+              <button id="resumeGameBtn" type="button">Continuar</button>
+              <button id="pauseMenuBtn" type="button" class="secondary">Menu</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="gameOverScreen" class="screen">
+        <div class="panel game-over">
+          <p class="eyebrow">Sinal perdido</p>
+          <h2 id="finalTitle">Resultado</h2>
+          <p id="finalScore">Sua pontuacao: 0</p>
+          <ol id="finalRanking" class="leaderboard final"></ol>
+          <div class="menu-actions">
+            <button id="playAgainBtn" type="button">Outra corrida</button>
+            <button id="menuAgainBtn" type="button" class="secondary">Voltar ao início</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="phaseBanner" class="phase-banner" aria-hidden="true"></div>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/game.js"></script>
+  </body>
+</html>
