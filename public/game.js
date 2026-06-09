@@ -67,6 +67,7 @@ const state = {
   shootingByPointer: false,
   lastInputSent: 0,
   lastFrame: performance.now(),
+  lastHudRender: 0,
   frameDelta: 16.67,
   lastSnapshotAt: performance.now(),
   cameraRoll: -Math.PI / 2,
@@ -1177,7 +1178,7 @@ function createObstacleMesh(obstacle) {
     const group = new THREE.Group();
     const span = obstacle.angleSpan || 0.36;
     const points = [];
-    for (let i = -1; i <= 1; i += 0.25) {
+    for (let i = -1; i <= 1; i += 0.125) {
       const angle = (obstacle.angle || 0) + span * i;
       points.push(new THREE.Vector3(
         Math.cos(angle) * TUNNEL.radius * (obstacle.radial || 0.9),
@@ -1185,18 +1186,94 @@ function createObstacleMesh(obstacle) {
         0
       ));
     }
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color: 0xf4f4ee, transparent: true, opacity: 0.95 })
+    const curve = new THREE.CatmullRomCurve3(points);
+    const warningGlow = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 48, 5.2, 6, false),
+      new THREE.MeshBasicMaterial({
+        color: 0xff315c,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
     );
-    group.add(line);
+    warningGlow.userData.baseColor = 0xff315c;
+    const outerBand = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 48, 3.1, 6, false),
+      new THREE.MeshBasicMaterial({
+        color: 0xff5e78,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false
+      })
+    );
+    outerBand.userData.baseColor = 0xff5e78;
+    const coreBand = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 48, 1.35, 6, false),
+      new THREE.MeshBasicMaterial({ color: 0xfff4a8 })
+    );
+    coreBand.userData.baseColor = 0xfff4a8;
+
+    const beacons = new THREE.Group();
+    [points[0], points[points.length - 1]].forEach((point) => {
+      const beacon = new THREE.Mesh(
+        new THREE.OctahedronGeometry(6.8, 0),
+        new THREE.MeshBasicMaterial({ color: 0xffe66d, wireframe: true })
+      );
+      beacon.position.copy(point);
+      beacon.userData.baseColor = 0xffe66d;
+      const glow = createGlowSprite("rgba(255,74,95,1)");
+      glow.scale.set(34, 34, 1);
+      glow.position.copy(point);
+      beacons.add(glow, beacon);
+    });
+
+    group.add(warningGlow, outerBand, coreBand, beacons);
     group.userData.absoluteTunnel = true;
+    group.userData.ignoreDifficultyScale = true;
+    group.userData.obstacleType = "barrier";
+    group.userData.warningGlow = warningGlow;
+    group.userData.outerBand = outerBand;
+    group.userData.beacons = beacons;
     return group;
   }
-  return new THREE.Mesh(
-    new THREE.IcosahedronGeometry(10, 0),
-    materials.obstacle.clone()
+
+  const group = new THREE.Group();
+  const radius = Math.max(13, Math.min(32, (obstacle.radius || 22) * 0.7));
+  const glow = createGlowSprite("rgba(255,132,66,1)");
+  glow.scale.set(radius * 3.1, radius * 3.1, 1);
+  const core = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(radius * 0.72, 1),
+    new THREE.MeshBasicMaterial({
+      color: 0x5b271d,
+      transparent: true,
+      opacity: 0.82
+    })
   );
+  core.userData.baseColor = 0x5b271d;
+  const shell = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(radius, 1),
+    new THREE.MeshBasicMaterial({ color: 0xff9057, wireframe: true })
+  );
+  shell.userData.baseColor = 0xff9057;
+  const warningRing = new THREE.Mesh(
+    new THREE.TorusGeometry(radius * 1.2, 1.15, 5, 22),
+    new THREE.MeshBasicMaterial({
+      color: 0xffe66d,
+      transparent: true,
+      opacity: 0.78,
+      wireframe: true
+    })
+  );
+  warningRing.userData.baseColor = 0xffe66d;
+  group.add(glow, core, shell, warningRing);
+  group.userData.ignoreDifficultyScale = true;
+  group.userData.obstacleType = "asteroid";
+  group.userData.glow = glow;
+  group.userData.core = core;
+  group.userData.shell = shell;
+  group.userData.warningRing = warningRing;
+  return group;
 }
 
 function createGlowSprite(color) {
@@ -1353,7 +1430,7 @@ function updateEntity(mesh, entity) {
     mesh.rotation.y += 0.025 * frameScale;
   }
   const scale = Math.max(0.7, 1.8 - (entity.depth || 0) / 900);
-  const difficultyScale = entity.sizeScale || 1;
+  const difficultyScale = mesh.userData.ignoreDifficultyScale ? 1 : entity.sizeScale || 1;
   mesh.scale.setScalar(scale * difficultyScale);
 
   if (mesh.userData.enemyType) {
@@ -1361,6 +1438,9 @@ function updateEntity(mesh, entity) {
   }
   if (mesh.userData.powerType) {
     animatePowerUpMesh(mesh, entity, now);
+  }
+  if (mesh.userData.obstacleType) {
+    animateObstacleMesh(mesh, entity, now);
   }
 
   const flashing = mesh.userData.flashUntil > now;
@@ -1371,6 +1451,23 @@ function updateEntity(mesh, entity) {
       node.material.color.setHex(flashing ? 0xffffff : baseColor);
     }
   });
+}
+
+function animateObstacleMesh(mesh, entity, time) {
+  const frameScale = state.frameDelta / 16.67;
+  const pulse = 0.5 + Math.sin(time * 0.009 + (entity.angle || 0)) * 0.5;
+  if (mesh.userData.obstacleType === "barrier") {
+    mesh.userData.warningGlow.material.opacity = 0.14 + pulse * 0.18;
+    mesh.userData.outerBand.material.opacity = 0.58 + pulse * 0.3;
+    mesh.userData.beacons.rotation.z += 0.045 * frameScale;
+  } else {
+    mesh.userData.shell.rotation.x += 0.018 * frameScale;
+    mesh.userData.shell.rotation.y += 0.027 * frameScale;
+    mesh.userData.core.rotation.x -= 0.011 * frameScale;
+    mesh.userData.warningRing.rotation.x += 0.024 * frameScale;
+    mesh.userData.warningRing.rotation.z -= 0.038 * frameScale;
+    mesh.userData.glow.material.opacity = 0.34 + pulse * 0.28;
+  }
 }
 
 function animateEnemyMesh(mesh, entity, time) {
@@ -1515,9 +1612,12 @@ function animate(time) {
     }
   });
 
-  if (state.current) {
+  if (state.current && state.screen === "game") {
     syncScene(state.current);
-    renderRoomRanking(state.current);
+    if (time - state.lastHudRender >= 100) {
+      state.lastHudRender = time;
+      renderRoomRanking(state.current);
+    }
   } else {
     const demoPlayer = {
       id: "demo",

@@ -79,6 +79,7 @@ O servidor controla salas, jogadores, inimigos, obstaculos, power-ups, vida, pon
 - Inimigos em linha reta, zigue-zague, rapidos e resistentes.
 - Inimigos passam a manobrar dentro do tunel depois de um tempo de corrida.
 - Obstaculos do tipo asteroide e barreira energetica.
+- Obstaculos com nucleos solidos, halos pulsantes, cores de alerta e balizas luminosas para leitura em alta velocidade.
 - Power-ups de escudo, tiro rapido, cura, bonus e aneis de upgrade de arma.
 - HUD lateral com identificacao e duracao dos efeitos coletados.
 - Aneis de arma com halo, animacao e destaque visual proprio.
