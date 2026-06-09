@@ -18,6 +18,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@fontsource/orbitron": "^5.2.8",
+    "@fontsource/rajdhani": "^5.2.7",
     "express": "^4.19.2",
     "socket.io": "^4.7.5",
     "three": "^0.184.0"

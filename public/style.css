@@ -1,3 +1,35 @@
+@font-face {
+  font-family: "Orbitron";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/orbitron-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Orbitron";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/orbitron-latin-800-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/rajdhani-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/rajdhani-latin-600-normal.woff2") format("woff2");
+}
+
 :root {
   --bg: #05070c;
   --panel: rgba(8, 13, 24, 0.86);
@@ -23,7 +55,8 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Rajdhani", "Segoe UI", sans-serif;
+  font-size: 17px;
 }
 
 body {
@@ -36,6 +69,8 @@ input {
 }
 
 button {
+  font-family: "Orbitron", "Rajdhani", sans-serif;
+  font-size: 0.74rem;
   border: 1px solid rgba(191, 252, 240, 0.46);
   border-radius: 6px;
   background: #dffdf0;
@@ -86,6 +121,23 @@ button.ghost {
   z-index: 0;
 }
 
+.app-shell::after {
+  background:
+    radial-gradient(circle at center, transparent 48%, rgba(0, 0, 0, 0.28) 78%, rgba(0, 0, 0, 0.62) 100%),
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(255, 255, 255, 0.018) 0deg 0.35deg, transparent 0.35deg 7deg);
+  content: "";
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: fixed;
+  transition: opacity 400ms ease;
+  z-index: 1;
+}
+
+.app-shell[data-screen="game"]::after {
+  opacity: 1;
+}
+
 .app-shell[data-screen="game"]::before {
   opacity: 0;
 }
@@ -118,7 +170,8 @@ button.ghost {
   align-items: center;
   color: var(--text);
   display: flex;
-  font-size: 0.78rem;
+  font-family: "Orbitron", sans-serif;
+  font-size: 0.68rem;
   font-weight: 900;
   gap: 9px;
   text-decoration: none;
@@ -210,6 +263,7 @@ button.ghost {
 }
 
 .brand-block h1 {
+  font-family: "Orbitron", sans-serif;
   margin: 0;
   font-size: clamp(3.7rem, 8vw, 7.2rem);
   line-height: 0.84;
@@ -227,6 +281,7 @@ button.ghost {
 }
 
 .eyebrow {
+  font-family: "Orbitron", sans-serif;
   color: var(--cyan);
   font-size: 0.72rem;
   font-weight: 900;
@@ -278,6 +333,7 @@ button.ghost {
 }
 
 .console-heading h2 {
+  font-family: "Orbitron", sans-serif;
   font-size: 1.55rem;
   margin: 0;
 }
@@ -308,6 +364,14 @@ label {
   gap: 8px;
   margin-bottom: 16px;
   text-transform: uppercase;
+}
+
+label,
+.hud,
+.leaderboard,
+.quick-rules,
+.menu-meta {
+  font-family: "Rajdhani", sans-serif;
 }
 
 input {
@@ -391,6 +455,7 @@ kbd {
 
 .lobby-main h2,
 .game-over h2 {
+  font-family: "Orbitron", sans-serif;
   font-size: clamp(2.2rem, 7vw, 5rem);
   line-height: 0.9;
   margin: 0 0 10px;
@@ -430,6 +495,8 @@ kbd {
 
 .compact h3,
 .rank-panel h3 {
+  font-family: "Orbitron", sans-serif;
+  font-size: 0.78rem;
   margin: 0 0 12px;
 }
 
@@ -513,6 +580,7 @@ kbd {
 
 .upgrade-name {
   color: var(--text);
+  font-family: "Orbitron", sans-serif;
   font-size: 0.78rem;
   font-weight: 800;
   overflow: hidden;
@@ -547,6 +615,7 @@ kbd {
 
 .buff-hub-title {
   color: var(--text);
+  font-family: "Orbitron", sans-serif;
   font-size: 0.72rem;
   font-weight: 900;
   margin: 0 0 8px;
@@ -722,6 +791,7 @@ kbd {
 }
 
 .phase-banner {
+  font-family: "Orbitron", sans-serif;
   color: var(--text);
   font-size: clamp(2rem, 7vw, 5rem);
   font-weight: 950;
@@ -742,6 +812,15 @@ kbd {
 .phase-banner.show {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
+}
+
+.phase-banner small {
+  color: var(--yellow);
+  display: block;
+  font-family: "Rajdhani", sans-serif;
+  font-size: 0.22em;
+  font-weight: 600;
+  margin-top: 12px;
 }
 
 @media (max-width: 820px) {

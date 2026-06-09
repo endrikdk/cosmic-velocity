@@ -74,14 +74,28 @@ const state = {
   phase: 1,
   paused: false,
   buffPickups: [],
-  musicEnabled: localStorage.getItem("cosmicMusic") !== "off"
+  musicEnabled: localStorage.getItem("cosmicMusic") !== "off",
+  cameraShake: 0,
+  turnVelocity: 0,
+  lastSelfAngle: null,
+  phasePulse: 0
 };
 
 const hubMusic = {
   context: null,
   master: null,
+  hubBus: null,
+  gameBus: null,
+  sfxBus: null,
+  engineOscillator: null,
+  engineGain: null,
+  noiseBuffer: null,
   timer: null,
-  step: 0
+  gameTimer: null,
+  step: 0,
+  gameStep: 0,
+  track: 0,
+  lastSfx: new Map()
 };
 
 const POWER_UP_INFO = {
@@ -91,6 +105,8 @@ const POWER_UP_INFO = {
   bonus: { icon: "*", name: "Bonus", detail: "Pontuacao extra", tone: "pink" },
   upgrade: { icon: "W", name: "Arma", detail: "Aumenta o poder de fogo", tone: "weapon" }
 };
+
+const GAME_TRACK_NAMES = ["Cold Circuit", "Neon Pursuit", "Solar Collapse"];
 
 const PHASES = [
   {
@@ -164,6 +180,13 @@ worldRoot.add(tunnelGroup);
 const entityGroup = new THREE.Group();
 worldRoot.add(entityGroup);
 
+const effectsGroup = new THREE.Group();
+worldRoot.add(effectsGroup);
+
+const transientEffects = [];
+const velocityField = createVelocityField();
+worldRoot.add(velocityField);
+
 const playerMeshes = new Map();
 const enemyMeshes = new Map();
 const obstacleMeshes = new Map();
@@ -218,17 +241,45 @@ function initHubMusic() {
 
   const context = new AudioContextClass();
   const master = context.createGain();
+  const hubBus = context.createGain();
+  const gameBus = context.createGain();
+  const sfxBus = context.createGain();
   const compressor = context.createDynamicsCompressor();
   const filter = context.createBiquadFilter();
   master.gain.value = 0;
+  hubBus.gain.value = 1;
+  gameBus.gain.value = 0;
+  sfxBus.gain.value = 0.72;
   filter.type = "lowpass";
   filter.frequency.value = 1250;
   filter.Q.value = 0.7;
+  hubBus.connect(master);
+  gameBus.connect(master);
+  sfxBus.connect(compressor);
   master.connect(filter);
   filter.connect(compressor);
   compressor.connect(context.destination);
   hubMusic.context = context;
   hubMusic.master = master;
+  hubMusic.hubBus = hubBus;
+  hubMusic.gameBus = gameBus;
+  hubMusic.sfxBus = sfxBus;
+  hubMusic.noiseBuffer = createNoiseBuffer(context);
+
+  const engineOscillator = context.createOscillator();
+  const engineFilter = context.createBiquadFilter();
+  const engineGain = context.createGain();
+  engineOscillator.type = "sawtooth";
+  engineOscillator.frequency.value = 48;
+  engineFilter.type = "lowpass";
+  engineFilter.frequency.value = 240;
+  engineGain.gain.value = 0.0001;
+  engineOscillator.connect(engineFilter);
+  engineFilter.connect(engineGain);
+  engineGain.connect(sfxBus);
+  engineOscillator.start();
+  hubMusic.engineOscillator = engineOscillator;
+  hubMusic.engineGain = engineGain;
 
   const drone = [55, 82.41];
   drone.forEach((frequency, index) => {
@@ -238,13 +289,24 @@ function initHubMusic() {
     oscillator.frequency.value = frequency;
     gain.gain.value = index ? 0.06 : 0.085;
     oscillator.connect(gain);
-    gain.connect(master);
+    gain.connect(hubBus);
     oscillator.start();
   });
 
   scheduleHubPhrase();
   hubMusic.timer = window.setInterval(scheduleHubPhrase, 8000);
+  scheduleGameBeat();
+  hubMusic.gameTimer = window.setInterval(scheduleGameBeat, 2000);
   updateHubMusic();
+}
+
+function createNoiseBuffer(context) {
+  const buffer = context.createBuffer(1, context.sampleRate * 1.5, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < channel.length; i += 1) {
+    channel[i] = Math.random() * 2 - 1;
+  }
+  return buffer;
 }
 
 function scheduleHubPhrase() {
@@ -268,20 +330,217 @@ function scheduleHubPhrase() {
     gain.gain.exponentialRampToValueAtTime(0.032, start + 1.4 + index * 0.18);
     gain.gain.exponentialRampToValueAtTime(0.0001, start + 7.4);
     oscillator.connect(gain);
-    gain.connect(hubMusic.master);
+    gain.connect(hubMusic.hubBus);
     oscillator.start(start);
     oscillator.stop(start + 7.6);
   });
   hubMusic.step += 1;
 }
 
+function scheduleGameBeat() {
+  const context = hubMusic.context;
+  if (!context || !hubMusic.gameBus) return;
+  const track = hubMusic.track % 3;
+  const start = context.currentTime + 0.06;
+  const tracks = [
+    {
+      root: 55,
+      scale: [1, 1.1892, 1.4983, 1.7818],
+      tempo: 0.25,
+      wave: "sawtooth",
+      cutoff: 880
+    },
+    {
+      root: 65.41,
+      scale: [1, 1.2599, 1.4983, 2],
+      tempo: 0.2,
+      wave: "square",
+      cutoff: 1450
+    },
+    {
+      root: 49,
+      scale: [1, 1.1225, 1.4983, 1.6818],
+      tempo: 0.285,
+      wave: "triangle",
+      cutoff: 720
+    }
+  ];
+  const config = tracks[track];
+
+  for (let step = 0; step < 8; step += 1) {
+    const time = start + step * config.tempo;
+    const scaleIndex = (hubMusic.gameStep + step + track) % config.scale.length;
+    const frequency = config.root * config.scale[scaleIndex] * (step % 4 === 3 ? 2 : 1);
+    scheduleGameTone(frequency, time, config.tempo * 0.72, {
+      type: config.wave,
+      volume: track === 1 ? 0.021 : 0.028,
+      cutoff: config.cutoff
+    });
+    if (step % 2 === 0) scheduleKick(time, track === 2 ? 0.12 : 0.085);
+    if (track === 1 && step % 2 === 1) scheduleNoiseHit(time, 0.025, 0.045, 4200);
+    if (track === 2 && step === 4) {
+      scheduleGameTone(config.root / 2, time, 1.3, {
+        type: "sawtooth",
+        volume: 0.035,
+        cutoff: 420
+      });
+    }
+  }
+  hubMusic.gameStep += 8;
+}
+
+function scheduleGameTone(frequency, start, duration, options = {}) {
+  const context = hubMusic.context;
+  if (!context || !hubMusic.gameBus) return;
+  const oscillator = context.createOscillator();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+  oscillator.type = options.type || "triangle";
+  oscillator.frequency.setValueAtTime(frequency, start);
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(options.cutoff || 1000, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(options.volume || 0.025, start + 0.018);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(filter);
+  filter.connect(gain);
+  gain.connect(hubMusic.gameBus);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.05);
+}
+
+function scheduleKick(start, volume = 0.09) {
+  const context = hubMusic.context;
+  if (!context || !hubMusic.gameBus) return;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(120, start);
+  oscillator.frequency.exponentialRampToValueAtTime(42, start + 0.12);
+  gain.gain.setValueAtTime(volume, start);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+  oscillator.connect(gain);
+  gain.connect(hubMusic.gameBus);
+  oscillator.start(start);
+  oscillator.stop(start + 0.18);
+}
+
+function scheduleNoiseHit(start, volume, duration, cutoff = 2400, destination = hubMusic.gameBus) {
+  const context = hubMusic.context;
+  if (!context || !hubMusic.noiseBuffer || !destination) return;
+  const source = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+  source.buffer = hubMusic.noiseBuffer;
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(cutoff, start);
+  filter.Q.value = 0.8;
+  gain.gain.setValueAtTime(volume, start);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(destination);
+  source.start(start);
+  source.stop(start + duration + 0.02);
+}
+
+function playSfx(name, options = {}) {
+  if (!state.musicEnabled || !hubMusic.context || !hubMusic.sfxBus) return;
+  const time = performance.now();
+  const throttle = options.throttle ?? 35;
+  if (time - (hubMusic.lastSfx.get(name) || 0) < throttle) return;
+  hubMusic.lastSfx.set(name, time);
+
+  const context = hubMusic.context;
+  const start = context.currentTime + 0.005;
+  const tone = (from, to, duration, type, volume) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(from, start);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, to), start + duration);
+    gain.gain.setValueAtTime(volume, start);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(hubMusic.sfxBus);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+  };
+
+  if (name === "shoot") tone(760, 220, 0.075, "square", options.local ? 0.055 : 0.022);
+  if (name === "enemySpawn") tone(180, 520, 0.22, "sawtooth", 0.018);
+  if (name === "hit") {
+    tone(190, 80, 0.11, "square", 0.055);
+    scheduleNoiseHit(start, 0.035, 0.09, 1700, hubMusic.sfxBus);
+  }
+  if (name === "destroy") {
+    tone(145, 38, 0.42, "sawtooth", 0.08);
+    scheduleNoiseHit(start, 0.11, 0.34, 850, hubMusic.sfxBus);
+  }
+  if (name === "damage") {
+    tone(115, 44, 0.35, "sawtooth", 0.12);
+    scheduleNoiseHit(start, 0.08, 0.25, 520, hubMusic.sfxBus);
+  }
+  if (name === "shield") {
+    tone(280, 920, 0.42, "sine", 0.075);
+    tone(420, 1380, 0.35, "triangle", 0.035);
+  }
+  if (name === "heal") {
+    tone(440, 660, 0.2, "sine", 0.06);
+    window.setTimeout(() => playSfx("healHigh", { throttle: 0 }), 90);
+  }
+  if (name === "healHigh") tone(660, 990, 0.24, "sine", 0.045);
+  if (name === "rapid") {
+    tone(360, 1180, 0.18, "square", 0.05);
+    tone(520, 1680, 0.24, "triangle", 0.035);
+  }
+  if (name === "bonus") {
+    tone(620, 930, 0.15, "sine", 0.055);
+    window.setTimeout(() => playSfx("bonusHigh", { throttle: 0 }), 80);
+  }
+  if (name === "bonusHigh") tone(930, 1390, 0.22, "sine", 0.045);
+  if (name === "upgrade") {
+    tone(220, 880, 0.55, "sawtooth", 0.065);
+    tone(330, 1320, 0.7, "sine", 0.045);
+  }
+  if (name === "phase") {
+    tone(82, 660, 1.15, "sawtooth", 0.09);
+    scheduleNoiseHit(start + 0.05, 0.08, 0.7, 1200, hubMusic.sfxBus);
+  }
+  if (name === "pause") tone(300, 120, 0.25, "triangle", 0.05);
+  if (name === "resume") tone(180, 480, 0.22, "triangle", 0.05);
+  if (name === "death") {
+    tone(220, 28, 1.2, "sawtooth", 0.12);
+    scheduleNoiseHit(start, 0.13, 0.9, 460, hubMusic.sfxBus);
+  }
+}
+
 function updateHubMusic() {
-  if (!hubMusic.context || !hubMusic.master) return;
+  if (!hubMusic.context || !hubMusic.master || !hubMusic.hubBus || !hubMusic.gameBus) return;
   const isHub = ["menu", "lobby", "over"].includes(state.screen);
-  const target = state.musicEnabled ? (isHub ? 0.42 : 0.035) : 0.0001;
+  const masterTarget = state.musicEnabled ? 0.42 : 0.0001;
+  const hubTarget = isHub ? 1 : 0.025;
+  const gameTarget = !isHub && !state.paused ? 0.72 : 0.0001;
+  const sfxTarget = state.musicEnabled ? 0.72 : 0.0001;
   const time = hubMusic.context.currentTime;
   hubMusic.master.gain.cancelScheduledValues(time);
-  hubMusic.master.gain.setTargetAtTime(target, time, isHub ? 0.8 : 0.35);
+  hubMusic.hubBus.gain.cancelScheduledValues(time);
+  hubMusic.gameBus.gain.cancelScheduledValues(time);
+  hubMusic.sfxBus.gain.cancelScheduledValues(time);
+  hubMusic.master.gain.setTargetAtTime(masterTarget, time, 0.3);
+  hubMusic.hubBus.gain.setTargetAtTime(hubTarget, time, isHub ? 0.8 : 0.35);
+  hubMusic.gameBus.gain.setTargetAtTime(gameTarget, time, 0.7);
+  hubMusic.sfxBus.gain.setTargetAtTime(sfxTarget, time, 0.18);
+}
+
+function updateEngineAudio(speed) {
+  if (!hubMusic.context || !hubMusic.engineOscillator || !hubMusic.engineGain) return;
+  const time = hubMusic.context.currentTime;
+  const self = state.current && getSelf(state.current);
+  const active = state.screen === "game" && !state.paused && self && self.alive && state.musicEnabled;
+  const frequency = 42 + Math.min(150, speed * 2.1) + Math.abs(state.turnVelocity) * 18;
+  hubMusic.engineOscillator.frequency.setTargetAtTime(frequency, time, 0.08);
+  hubMusic.engineGain.gain.setTargetAtTime(active ? 0.018 + Math.min(0.035, speed * 0.00055) : 0.0001, time, 0.12);
 }
 
 function updateMusicToggle() {
@@ -544,6 +803,127 @@ function buildTunnel() {
   tunnelGroup.add(rings, rails);
 }
 
+function createVelocityField() {
+  const count = 280;
+  const positions = new Float32Array(count * 3);
+  const speeds = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const angle = Math.random() * TAU;
+    const radius = 18 + Math.random() * (TUNNEL.radius * 1.8);
+    positions[i * 3] = Math.cos(angle) * radius;
+    positions[i * 3 + 1] = Math.sin(angle) * radius;
+    positions[i * 3 + 2] = -TUNNEL.nearDepth - Math.random() * (TUNNEL.farDepth - TUNNEL.nearDepth);
+    speeds[i] = 0.55 + Math.random() * 1.4;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: 0xa7eaff,
+    map: getParticleTexture(),
+    size: 1.15,
+    transparent: true,
+    opacity: 0.38,
+    depthWrite: false,
+    alphaTest: 0.02,
+    blending: THREE.AdditiveBlending
+  });
+  const points = new THREE.Points(geometry, material);
+  points.userData.speeds = speeds;
+  return points;
+}
+
+function getParticleTexture() {
+  if (getParticleTexture.texture) return getParticleTexture.texture;
+  const particleCanvas = document.createElement("canvas");
+  particleCanvas.width = 64;
+  particleCanvas.height = 64;
+  const context = particleCanvas.getContext("2d");
+  const gradient = context.createRadialGradient(32, 32, 2, 32, 32, 30);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.28, "rgba(255,255,255,0.8)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 64, 64);
+  getParticleTexture.texture = new THREE.CanvasTexture(particleCanvas);
+  return getParticleTexture.texture;
+}
+
+function updateVelocityField(speed, frameScale) {
+  const positions = velocityField.geometry.attributes.position.array;
+  const speeds = velocityField.userData.speeds;
+  const boost = Math.max(1, speed * 0.2);
+  for (let i = 0; i < speeds.length; i += 1) {
+    const index = i * 3 + 2;
+    positions[index] += boost * speeds[i] * frameScale;
+    if (positions[index] > -14) {
+      positions[index] = -TUNNEL.farDepth - Math.random() * 180;
+    }
+  }
+  velocityField.geometry.attributes.position.needsUpdate = true;
+  velocityField.material.size = 0.8 + Math.min(3.2, speed * 0.035);
+  velocityField.material.opacity = 0.22 + Math.min(0.55, speed * 0.009);
+}
+
+function createBurst(position, color, count = 18, force = 1) {
+  if (!position) return;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    positions[i * 3] = position.x;
+    positions[i * 3 + 1] = position.y;
+    positions[i * 3 + 2] = position.z;
+    velocities[i * 3] = (Math.random() - 0.5) * 2.8 * force;
+    velocities[i * 3 + 1] = (Math.random() - 0.5) * 2.8 * force;
+    velocities[i * 3 + 2] = (Math.random() - 0.5) * 5.5 * force;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color,
+    map: getParticleTexture(),
+    size: 2.4 * force,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    alphaTest: 0.02,
+    blending: THREE.AdditiveBlending
+  });
+  const points = new THREE.Points(geometry, material);
+  effectsGroup.add(points);
+  transientEffects.push({
+    points,
+    velocities,
+    bornAt: performance.now(),
+    duration: 420 + force * 180
+  });
+}
+
+function updateTransientEffects(time, frameScale) {
+  for (let i = transientEffects.length - 1; i >= 0; i -= 1) {
+    const effect = transientEffects[i];
+    const age = time - effect.bornAt;
+    const progress = age / effect.duration;
+    const positions = effect.points.geometry.attributes.position.array;
+    for (let p = 0; p < effect.velocities.length; p += 3) {
+      positions[p] += effect.velocities[p] * frameScale;
+      positions[p + 1] += effect.velocities[p + 1] * frameScale;
+      positions[p + 2] += effect.velocities[p + 2] * frameScale;
+      effect.velocities[p] *= 0.965;
+      effect.velocities[p + 1] *= 0.965;
+      effect.velocities[p + 2] *= 0.965;
+    }
+    effect.points.geometry.attributes.position.needsUpdate = true;
+    effect.points.material.opacity = Math.max(0, 1 - progress);
+    effect.points.material.size *= 0.992;
+    if (progress >= 1) {
+      effectsGroup.remove(effect.points);
+      effect.points.geometry.dispose();
+      effect.points.material.dispose();
+      transientEffects.splice(i, 1);
+    }
+  }
+}
+
 function createBackdropPlanes() {
   const shape = new THREE.Shape();
   shape.moveTo(-900, -500);
@@ -577,11 +957,14 @@ function phasePalette(phase) {
 function applyPhasePalette(phase) {
   if (state.phase === phase) return;
   state.phase = phase;
+  hubMusic.track = ((phase || 1) - 1) % 3;
+  hubMusic.gameStep = 0;
   const palette = phasePalette(phase);
   scene.fog.color.setHex(palette.fog);
   renderer.setClearColor(palette.fog, 1);
   materials.tunnel.color.setHex(palette.tunnel);
   materials.tunnelDim.color.setHex(palette.tunnelDim);
+  velocityField.material.color.setHex(palette.tunnel);
 
   scene.children.forEach((child) => {
     if (child.userData.backdrop && child.material) {
@@ -592,7 +975,8 @@ function applyPhasePalette(phase) {
 }
 
 function showPhaseBanner(phase) {
-  ui.phaseBanner.textContent = `Fase ${phase}`;
+  const trackName = GAME_TRACK_NAMES[((phase || 1) - 1) % GAME_TRACK_NAMES.length];
+  ui.phaseBanner.innerHTML = `Fase ${phase}<small>${trackName}</small>`;
   ui.phaseBanner.classList.add("show");
   window.clearTimeout(showPhaseBanner.timer);
   showPhaseBanner.timer = window.setTimeout(() => {
@@ -728,14 +1112,19 @@ function createShipMesh(player) {
 
   const flame = new THREE.Mesh(
     new THREE.ConeGeometry(3.2, 11, 3),
-    new THREE.MeshBasicMaterial({ color: 0xff9057, wireframe: true })
+    new THREE.MeshBasicMaterial({ color: 0xff9057, wireframe: true, transparent: true, opacity: 0.92 })
   );
   flame.position.y = -13;
   flame.rotation.x = Math.PI;
 
-  group.add(fill, outline, flame);
+  const engineGlow = createGlowSprite("rgba(77,247,255,1)");
+  engineGlow.scale.set(18, 18, 1);
+  engineGlow.position.y = -10;
+
+  group.add(fill, outline, flame, engineGlow);
   group.userData.outline = outline;
   group.userData.flame = flame;
+  group.userData.engineGlow = engineGlow;
   return group;
 }
 
@@ -884,12 +1273,26 @@ function createPowerUpMesh(powerUp) {
 }
 
 function createProjectileMesh(projectile) {
+  const group = new THREE.Group();
   const geometry = new THREE.CylinderGeometry(0.9, 0.9, 16, 5);
   const material = materials.projectile.clone();
-  material.color.setHex(colorFromHex(projectile.color, 0xffffff));
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = Math.PI / 2;
-  return mesh;
+  const color = colorFromHex(projectile.color, 0xffffff);
+  material.color.setHex(color);
+  const core = new THREE.Mesh(geometry, material);
+  core.rotation.x = Math.PI / 2;
+  const trail = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 8),
+      new THREE.Vector3(0, 0, 34)
+    ]),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 })
+  );
+  const glow = createGlowSprite("rgba(255,255,255,1)");
+  glow.scale.set(8, 8, 1);
+  group.add(core, trail, glow);
+  group.userData.trail = trail;
+  group.userData.glow = glow;
+  return group;
 }
 
 function syncCollection(collection, meshes, createMesh, updateMesh) {
@@ -915,14 +1318,23 @@ function syncCollection(collection, meshes, createMesh, updateMesh) {
 function updateShip(mesh, player) {
   mesh.visible = player.connected !== false;
   const target = tunnelPosition(player);
-  moveSmooth(mesh, target, player.id === state.selfId ? 0.42 : 0.26);
+  moveSmooth(mesh, target, player.id === state.selfId ? 0.34 : 0.24);
   mesh.scale.setScalar(player.id === state.selfId ? 1.25 : 0.92);
   const targetRoll = (player.angle || 0) - Math.PI / 2;
-  mesh.rotation.z += signedAngleDelta(targetRoll, mesh.rotation.z) * 0.32;
-  mesh.rotation.x += (-0.28 - mesh.rotation.x) * 0.24;
+  const bank = player.id === state.selfId ? state.turnVelocity : 0;
+  mesh.rotation.z += signedAngleDelta(targetRoll, mesh.rotation.z) * 0.26;
+  mesh.rotation.x += (-0.28 - Math.abs(bank) * 0.18 - mesh.rotation.x) * 0.18;
+  mesh.rotation.y += (bank * -0.42 - mesh.rotation.y) * 0.2;
   mesh.userData.outline.material.color.setHex(colorFromHex(player.color));
   mesh.userData.flame.visible = player.alive;
+  const speed = state.current ? state.current.speed || 5 : 5;
+  const thrust = 0.82 + Math.min(1.8, speed * 0.025) + Math.abs(bank) * 0.28;
+  mesh.userData.flame.scale.set(1, thrust, 1);
+  mesh.userData.flame.material.opacity = 0.64 + Math.sin(performance.now() * 0.035) * 0.18;
+  mesh.userData.engineGlow.material.opacity = 0.42 + Math.min(0.42, speed * 0.008);
+  mesh.userData.engineGlow.scale.setScalar(16 + Math.min(18, speed * 0.18));
   mesh.children.forEach((child) => {
+    if (child === mesh.userData.flame || child === mesh.userData.engineGlow) return;
     child.material.opacity = player.alive ? 1 : 0.32;
     child.material.transparent = !player.alive;
   });
@@ -1004,8 +1416,8 @@ function syncScene(snapshot) {
   const visualSnapshot = makeVisualSnapshot(snapshot);
   const self = getSelf(visualSnapshot);
   if (self && Number.isFinite(self.angle)) {
-    const target = -self.angle - Math.PI / 2;
-    state.cameraRoll += signedAngleDelta(target, state.cameraRoll) * 0.16;
+    const target = -self.angle - Math.PI / 2 - state.turnVelocity * 0.075;
+    state.cameraRoll += signedAngleDelta(target, state.cameraRoll) * 0.12;
   }
 
   tunnelGroup.rotation.z = state.cameraRoll;
@@ -1064,6 +1476,27 @@ function animate(time) {
   const frameScale = state.frameDelta / 16.67;
   sendInput(time);
   const speed = state.paused ? 0 : state.current ? state.current.speed : 5;
+  updateEngineAudio(speed);
+  const input = currentInput();
+  const turnTarget = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * (state.paused ? 0 : 1);
+  state.turnVelocity += (turnTarget - state.turnVelocity) * Math.min(1, 0.14 * frameScale);
+  state.cameraShake *= Math.pow(0.84, frameScale);
+  state.phasePulse *= Math.pow(0.94, frameScale);
+
+  const speedFov = Math.min(17, speed * 0.24);
+  const targetFov = 67 + speedFov + state.phasePulse * 5;
+  camera.fov += (targetFov - camera.fov) * Math.min(1, 0.055 * frameScale);
+  camera.position.x += (state.turnVelocity * 3.8 + (Math.random() - 0.5) * state.cameraShake - camera.position.x) * 0.12;
+  camera.position.y += (-8 + Math.abs(state.turnVelocity) * 1.6 + (Math.random() - 0.5) * state.cameraShake - camera.position.y) * 0.1;
+  camera.position.z += (76 - Math.min(13, speed * 0.12) - camera.position.z) * 0.08;
+  camera.lookAt(state.turnVelocity * -5, 0, -420);
+  camera.updateProjectionMatrix();
+
+  scene.fog.density = 0.00155 + Math.min(0.0011, speed * 0.000008);
+  materials.tunnel.opacity = 0.6 + Math.min(0.28, speed * 0.004);
+  materials.tunnelDim.opacity = 0.24 + Math.min(0.22, speed * 0.003);
+  updateVelocityField(speed, frameScale);
+  updateTransientEffects(time, frameScale);
   state.tunnelOffset = (state.tunnelOffset + speed * 0.46 * frameScale) % TUNNEL.ringSpacing;
   tunnelGroup.children.forEach((child) => {
     if (child.type === "Line") {
@@ -1227,11 +1660,33 @@ socket.on("playerState", (players) => {
     state.current.players = players;
   }
 });
-socket.on("playerDamaged", ({ shieldBlocked }) => {
+socket.on("spawnEnemy", () => {
+  playSfx("enemySpawn", { throttle: 520 });
+});
+socket.on("spawnObstacle", () => {
+  playSfx("enemySpawn", { throttle: 780 });
+});
+socket.on("playerShoot", (projectile) => {
+  playSfx("shoot", {
+    local: projectile.ownerId === state.selfId,
+    throttle: projectile.ownerId === state.selfId ? 42 : 95
+  });
+});
+socket.on("playerDamaged", ({ playerId, shieldBlocked }) => {
+  if (playerId === state.selfId) {
+    state.cameraShake = shieldBlocked ? 1.8 : 5.5;
+    playSfx(shieldBlocked ? "shield" : "damage", { throttle: 120 });
+    const ship = playerMeshes.get(playerId);
+    if (ship) createBurst(ship.position.clone(), shieldBlocked ? 0x6dff8d : 0xff5e78, 24, 1.2);
+  }
   toast(shieldBlocked ? "Escudo absorveu o impacto." : "Dano recebido.");
 });
 socket.on("playerDied", ({ playerId }) => {
   if (playerId === state.selfId) {
+    state.cameraShake = 9;
+    playSfx("death", { throttle: 0 });
+    const ship = playerMeshes.get(playerId);
+    if (ship) createBurst(ship.position.clone(), 0xff5e78, 54, 2.2);
     toast("Sua nave caiu. Voce esta no modo espectador.");
   }
 });
@@ -1243,12 +1698,27 @@ socket.on("weaponUpgraded", ({ playerId, weaponLevel, maxWeaponLevel }) => {
 socket.on("powerUpCollected", ({ playerId, type, duration }) => {
   if (playerId !== state.selfId) return;
   addBuffPickup(type, duration);
+  playSfx(type, { throttle: 0 });
+  const ship = playerMeshes.get(playerId);
+  const colors = {
+    shield: 0x6dff8d,
+    rapid: 0xffe66d,
+    heal: 0x4df7ff,
+    bonus: 0xff4de3,
+    upgrade: 0xfff16a
+  };
+  if (ship) createBurst(ship.position.clone(), colors[type] || 0xffffff, type === "upgrade" ? 42 : 26, type === "upgrade" ? 1.7 : 1.1);
   const info = POWER_UP_INFO[type];
   if (info) {
     toast(`${info.name}: ${info.detail}`);
   }
 });
 socket.on("phaseChanged", ({ phase, nickname }) => {
+  hubMusic.track = ((phase || 1) - 1) % 3;
+  hubMusic.gameStep = 0;
+  state.phasePulse = 1;
+  state.cameraShake = 3;
+  playSfx("phase", { throttle: 0 });
   toast(`Fase ${phase}: velocidade reduzida, nova escalada iniciada`);
   showPhaseBanner(phase);
   applyPhasePalette(phase);
@@ -1256,8 +1726,11 @@ socket.on("phaseChanged", ({ phase, nickname }) => {
 socket.on("hitEnemy", ({ enemyId, hp }) => {
   const mesh = enemyMeshes.get(enemyId);
   if (!mesh) return;
+  const hitPosition = mesh.position.clone();
   mesh.userData.flashUntil = performance.now() + 140;
   mesh.scale.multiplyScalar(1.25);
+  createBurst(hitPosition, hp <= 0 ? 0xff5e78 : 0xffffff, hp <= 0 ? 34 : 9, hp <= 0 ? 1.7 : 0.65);
+  playSfx(hp <= 0 ? "destroy" : "hit", { throttle: hp <= 0 ? 45 : 28 });
   if (hp <= 0) {
     disposeMesh(mesh);
     enemyMeshes.delete(enemyId);
@@ -1267,14 +1740,19 @@ socket.on("scoreUpdate", () => {});
 socket.on("gamePaused", ({ nickname, state: snapshot }) => {
   state.current = snapshot || state.current;
   showPauseOverlay(true, `${nickname || "Um piloto"} pausou a corrida.`);
+  playSfx("pause", { throttle: 0 });
+  updateHubMusic();
 });
 socket.on("gameResumed", ({ state: snapshot }) => {
   state.current = snapshot || state.current;
   showPauseOverlay(false);
+  playSfx("resume", { throttle: 0 });
+  updateHubMusic();
   toast("Corrida retomada.");
 });
 socket.on("gameOver", ({ ranking, leaderboard }) => {
   showPauseOverlay(false);
+  updateHubMusic();
   const self = (ranking || []).find((entry) => entry.id === state.selfId);
   ui.finalScore.textContent = `Sua pontuacao: ${self ? self.score : 0}`;
   ui.finalTitle.textContent = ranking && ranking[0] ? `${ranking[0].nickname} venceu` : "Resultado";

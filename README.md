@@ -90,6 +90,11 @@ O servidor controla salas, jogadores, inimigos, obstaculos, power-ups, vida, pon
 - Pause sincronizado para toda a sala.
 - Menu, lobby e tela de resultado integrados ao tunel 3D.
 - Trilha ambiente procedural original com controle de som.
+- Tres trilhas de corrida alternadas conforme as fases: Cold Circuit, Neon Pursuit e Solar Collapse.
+- Efeitos sonoros sintetizados para disparos, impactos, destruicoes, inimigos, power-ups, dano, escudo, fases, pause e morte.
+- Motor continuo da nave com frequencia e intensidade ligadas a velocidade.
+- Campo de particulas, explosoes, camera dinamica, inclinacao da nave e FOV adaptativo para reforcar profundidade e velocidade.
+- Tipografia local Orbitron e Rajdhani, sem dependencia de fontes externas em runtime.
 - Pontuacao por tempo, distancia, inimigos destruidos, coletas e sequencia sem dano.
 - Morte com modo espectador ate o fim da rodada.
 - Ranking da sala e ranking geral em memoria.
