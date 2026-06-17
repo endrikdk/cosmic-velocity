@@ -54,9 +54,35 @@ const ui = {
   pauseStatus: document.getElementById("pauseStatus"),
   resumeGame: document.getElementById("resumeGameBtn"),
   pauseMenu: document.getElementById("pauseMenuBtn"),
+  lobbyMute: document.getElementById("lobbyMuteBtn"),
+  gameMute: document.getElementById("gameMuteBtn"),
+  sfxMute: document.getElementById("sfxMuteBtn"),
+  lobbyVolume: document.getElementById("lobbyVolumeInput"),
+  gameVolume: document.getElementById("gameVolumeInput"),
+  sfxVolume: document.getElementById("sfxVolumeInput"),
   musicToggle: document.getElementById("musicToggleBtn"),
   musicToggleLabel: document.getElementById("musicToggleLabel")
 };
+
+function readAudioSettings() {
+  const defaults = {
+    lobbyVolume: 0.72,
+    gameVolume: 0.72,
+    sfxVolume: 0.72,
+    lobbyMuted: false,
+    gameMuted: false,
+    sfxMuted: false
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem("cosmicAudio") || "{}");
+    if (!localStorage.getItem("cosmicAudio") && localStorage.getItem("cosmicMusic") === "off") {
+      return { ...defaults, lobbyMuted: true, gameMuted: true, sfxMuted: true };
+    }
+    return { ...defaults, ...saved };
+  } catch (error) {
+    return defaults;
+  }
+}
 
 const keys = new Set();
 const state = {
@@ -75,7 +101,7 @@ const state = {
   phase: 1,
   paused: false,
   buffPickups: [],
-  musicEnabled: localStorage.getItem("cosmicMusic") !== "off",
+  audio: readAudioSettings(),
   cameraShake: 0,
   turnVelocity: 0,
   lastSelfAngle: null,
@@ -235,7 +261,6 @@ function initHubMusic() {
 
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) {
-    state.musicEnabled = false;
     updateMusicToggle();
     return;
   }
@@ -446,7 +471,7 @@ function scheduleNoiseHit(start, volume, duration, cutoff = 2400, destination = 
 }
 
 function playSfx(name, options = {}) {
-  if (!state.musicEnabled || !hubMusic.context || !hubMusic.sfxBus) return;
+  if (!isAudioChannelActive("sfx") || !hubMusic.context || !hubMusic.sfxBus) return;
   const time = performance.now();
   const throttle = options.throttle ?? 35;
   if (time - (hubMusic.lastSfx.get(name) || 0) < throttle) return;
@@ -519,10 +544,10 @@ function playSfx(name, options = {}) {
 function updateHubMusic() {
   if (!hubMusic.context || !hubMusic.master || !hubMusic.hubBus || !hubMusic.gameBus) return;
   const isHub = ["menu", "lobby", "over"].includes(state.screen);
-  const masterTarget = state.musicEnabled ? 0.42 : 0.0001;
-  const hubTarget = isHub ? 1 : 0.025;
-  const gameTarget = !isHub && !state.paused ? 0.72 : 0.0001;
-  const sfxTarget = state.musicEnabled ? 0.72 : 0.0001;
+  const masterTarget = hasAnyAudioEnabled() ? 0.48 : 0.0001;
+  const hubTarget = isHub && isAudioChannelActive("lobby") ? state.audio.lobbyVolume : 0.0001;
+  const gameTarget = !isHub && !state.paused && isAudioChannelActive("game") ? state.audio.gameVolume : 0.0001;
+  const sfxTarget = isAudioChannelActive("sfx") ? state.audio.sfxVolume : 0.0001;
   const time = hubMusic.context.currentTime;
   hubMusic.master.gain.cancelScheduledValues(time);
   hubMusic.hubBus.gain.cancelScheduledValues(time);
@@ -538,21 +563,70 @@ function updateEngineAudio(speed) {
   if (!hubMusic.context || !hubMusic.engineOscillator || !hubMusic.engineGain) return;
   const time = hubMusic.context.currentTime;
   const self = state.current && getSelf(state.current);
-  const active = state.screen === "game" && !state.paused && self && self.alive && state.musicEnabled;
+  const active = state.screen === "game" && !state.paused && self && self.alive && isAudioChannelActive("sfx");
   const frequency = 42 + Math.min(150, speed * 2.1) + Math.abs(state.turnVelocity) * 18;
   hubMusic.engineOscillator.frequency.setTargetAtTime(frequency, time, 0.08);
   hubMusic.engineGain.gain.setTargetAtTime(active ? 0.018 + Math.min(0.035, speed * 0.00055) : 0.0001, time, 0.12);
 }
 
 function updateMusicToggle() {
-  ui.musicToggle.setAttribute("aria-pressed", state.musicEnabled ? "true" : "false");
-  ui.musicToggleLabel.textContent = state.musicEnabled ? "Som ligado" : "Som desligado";
+  const activeChannels = [
+    isAudioChannelActive("lobby"),
+    isAudioChannelActive("game"),
+    isAudioChannelActive("sfx")
+  ].filter(Boolean).length;
+  if (ui.musicToggleLabel) {
+    ui.musicToggleLabel.textContent = activeChannels ? `Audio ${activeChannels}/3` : "Audio mutado";
+  }
+  [
+    ["lobby", ui.lobbyMute, ui.lobbyVolume],
+    ["game", ui.gameMute, ui.gameVolume],
+    ["sfx", ui.sfxMute, ui.sfxVolume]
+  ].forEach(([channel, button, slider]) => {
+    const mutedKey = `${channel}Muted`;
+    const volumeKey = `${channel}Volume`;
+    if (button) {
+      button.setAttribute("aria-pressed", state.audio[mutedKey] ? "true" : "false");
+      button.classList.toggle("muted", state.audio[mutedKey] || state.audio[volumeKey] <= 0);
+    }
+    if (slider) {
+      slider.value = String(Math.round(state.audio[volumeKey] * 100));
+    }
+  });
 }
 
-function toggleHubMusic() {
-  state.musicEnabled = !state.musicEnabled;
-  localStorage.setItem("cosmicMusic", state.musicEnabled ? "on" : "off");
-  if (state.musicEnabled) initHubMusic();
+function isAudioChannelActive(channel) {
+  return !state.audio[`${channel}Muted`] && state.audio[`${channel}Volume`] > 0;
+}
+
+function hasAnyAudioEnabled() {
+  return isAudioChannelActive("lobby") || isAudioChannelActive("game") || isAudioChannelActive("sfx");
+}
+
+function persistAudioSettings() {
+  localStorage.setItem("cosmicAudio", JSON.stringify(state.audio));
+}
+
+function setAudioVolume(channel, value) {
+  state.audio[`${channel}Volume`] = Math.max(0, Math.min(1, Number(value) / 100 || 0));
+  if (state.audio[`${channel}Volume`] > 0) {
+    state.audio[`${channel}Muted`] = false;
+  }
+  persistAudioSettings();
+  if (hasAnyAudioEnabled()) initHubMusic();
+  updateMusicToggle();
+  updateHubMusic();
+}
+
+function toggleAudioChannel(channel) {
+  const mutedKey = `${channel}Muted`;
+  const volumeKey = `${channel}Volume`;
+  state.audio[mutedKey] = !state.audio[mutedKey];
+  if (!state.audio[mutedKey] && state.audio[volumeKey] <= 0) {
+    state.audio[volumeKey] = 0.72;
+  }
+  persistAudioSettings();
+  if (hasAnyAudioEnabled()) initHubMusic();
   updateMusicToggle();
   updateHubMusic();
 }
@@ -1671,7 +1745,12 @@ ui.copyCode.addEventListener("click", async () => {
     toast(`Codigo da sala: ${state.roomId}`);
   }
 });
-ui.musicToggle.addEventListener("click", () => toggleHubMusic());
+ui.lobbyMute.addEventListener("click", () => toggleAudioChannel("lobby"));
+ui.gameMute.addEventListener("click", () => toggleAudioChannel("game"));
+ui.sfxMute.addEventListener("click", () => toggleAudioChannel("sfx"));
+ui.lobbyVolume.addEventListener("input", (event) => setAudioVolume("lobby", event.target.value));
+ui.gameVolume.addEventListener("input", (event) => setAudioVolume("game", event.target.value));
+ui.sfxVolume.addEventListener("input", (event) => setAudioVolume("sfx", event.target.value));
 ui.backToMenu.addEventListener("click", () => window.location.reload());
 ui.resumeGame.addEventListener("click", () => requestResume());
 ui.pauseMenu.addEventListener("click", () => window.location.reload());
@@ -1682,10 +1761,10 @@ ui.playAgain.addEventListener("click", () => {
 ui.menuAgain.addEventListener("click", () => window.location.reload());
 
 window.addEventListener("pointerdown", () => {
-  if (state.musicEnabled) initHubMusic();
+  if (hasAnyAudioEnabled()) initHubMusic();
 }, { once: true, capture: true });
 window.addEventListener("keydown", () => {
-  if (state.musicEnabled) initHubMusic();
+  if (hasAnyAudioEnabled()) initHubMusic();
 }, { once: true, capture: true });
 
 window.addEventListener("keydown", (event) => {

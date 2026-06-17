@@ -14,10 +14,26 @@
           <span class="brand-mark" aria-hidden="true"></span>
           <span>Cosmic Velocity</span>
         </a>
-        <button id="musicToggleBtn" class="sound-toggle" type="button" aria-pressed="true">
-          <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span id="musicToggleLabel">Som ligado</span>
-        </button>
+        <details class="audio-panel">
+          <summary id="audioSummary" class="sound-toggle">
+            <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="musicToggleLabel">Audio</span>
+          </summary>
+          <div class="audio-controls" aria-label="Controles de audio">
+            <div class="audio-control">
+              <button id="lobbyMuteBtn" class="audio-mute" type="button" aria-pressed="false">Lobby</button>
+              <input id="lobbyVolumeInput" type="range" min="0" max="100" value="72" aria-label="Volume da musica do lobby" />
+            </div>
+            <div class="audio-control">
+              <button id="gameMuteBtn" class="audio-mute" type="button" aria-pressed="false">Partida</button>
+              <input id="gameVolumeInput" type="range" min="0" max="100" value="72" aria-label="Volume da musica da partida" />
+            </div>
+            <div class="audio-control">
+              <button id="sfxMuteBtn" class="audio-mute" type="button" aria-pressed="false">Efeitos</button>
+              <input id="sfxVolumeInput" type="range" min="0" max="100" value="72" aria-label="Volume dos efeitos sonoros" />
+            </div>
+          </div>
+        </details>
       </header>
 
       <section id="menuScreen" class="screen screen-active">

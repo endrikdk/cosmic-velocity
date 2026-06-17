@@ -157,12 +157,19 @@ button.ghost {
 }
 
 .app-shell[data-screen="game"] .shell-header {
-  opacity: 0;
-  visibility: hidden;
+  justify-content: flex-end;
+  opacity: 1;
+  padding: 0 14px;
+  top: 78px;
+  visibility: visible;
+}
+
+.app-shell[data-screen="game"] .mini-brand {
+  display: none;
 }
 
 .mini-brand,
-.sound-toggle {
+.audio-panel {
   pointer-events: auto;
 }
 
@@ -194,16 +201,36 @@ button.ghost {
   position: absolute;
 }
 
+.audio-panel {
+  position: relative;
+}
+
 .sound-toggle {
   align-items: center;
   background: rgba(4, 8, 16, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
   color: var(--muted);
+  cursor: pointer;
   display: flex;
   font-size: 0.72rem;
   gap: 9px;
+  list-style: none;
   min-height: 36px;
   padding: 0 12px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.sound-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.audio-panel[open] .sound-toggle {
+  background: rgba(10, 18, 35, 0.92);
+  border-color: rgba(77, 247, 255, 0.32);
+  color: var(--text);
 }
 
 .sound-bars {
@@ -219,6 +246,48 @@ button.ghost {
   display: block;
   height: 7px;
   width: 2px;
+}
+
+.audio-controls {
+  background: rgba(5, 10, 22, 0.95);
+  border: 1px solid rgba(77, 247, 255, 0.22);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  min-width: 260px;
+  padding: 12px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+}
+
+.audio-control {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 84px minmax(120px, 1fr);
+}
+
+.audio-mute {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  font-size: 0.58rem;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.audio-mute.muted {
+  color: var(--danger);
+  border-color: rgba(255, 94, 120, 0.35);
+}
+
+.audio-control input[type="range"] {
+  accent-color: var(--yellow);
+  background: transparent;
+  min-height: 32px;
+  padding: 0;
 }
 
 .sound-bars i:nth-child(2) {
